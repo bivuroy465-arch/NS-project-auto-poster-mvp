@@ -1,0 +1,76 @@
+# AI auto-poster pipeline.
+# - lint + unit_test + smoke_test run on every push and MR (no API keys needed).
+# - auto_post runs on schedules and manual web runs.
+# Create a scheduled pipeline: Build > Pipeline schedules > New schedule
+# Example cron for 22:00 UTC daily:  0 22 * * *
+
+stages:
+  - test
+  - post
+
+variables:
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+
+default:
+  image: python:3.12-slim
+  cache:
+    key:
+      files:
+        - requirements.txt
+    paths:
+      - .cache/pip
+
+.test_rules: &test_rules
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push"'
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_PIPELINE_SOURCE == "web"'
+
+lint:
+  stage: test
+  <<: *test_rules
+  timeout: 10 minutes
+  before_script:
+    - python -m pip install --upgrade pip
+    - pip install --no-cache-dir ruff
+  script:
+    - ruff check .
+
+unit_test:
+  stage: test
+  <<: *test_rules
+  timeout: 10 minutes
+  before_script:
+    - python -m pip install --upgrade pip
+    - pip install --no-cache-dir -r requirements-dev.txt
+  script:
+    - pytest -q
+
+smoke_test:
+  stage: test
+  <<: *test_rules
+  timeout: 10 minutes
+  before_script:
+    - python -m pip install --upgrade pip
+    - pip install --no-cache-dir -r requirements.txt
+  script:
+    - python -m tests.smoke_test
+
+auto_post:
+  stage: post
+  timeout: 20 minutes
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule"'
+    - if: '$CI_PIPELINE_SOURCE == "web"'
+  before_script:
+    - python -m pip install --upgrade pip
+    - pip install --no-cache-dir -r requirements.txt
+  script:
+    - python -m src.main
+  after_script:
+    # Alert if the job itself crashed (e.g. cron failure, install error).
+    # Best-effort: never fails the pipeline because of the alert call.
+    - |
+      if [ "$CI_JOB_STATUS" != "success" ]; then
+        python -c "from src.notifier import send_alert; send_alert('Scheduled auto_post job FAILED (status=$CI_JOB_STATUS). Pipeline: $CI_PIPELINE_URL')" || true
+      fi

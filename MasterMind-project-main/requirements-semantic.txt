@@ -1,0 +1,7 @@
+# Optional extra for the semantic dedup subsystem (src/semantic_dedup.py).
+# Core requirements.txt stays free of heavy binary deps for users who don't
+# enable semantic dedup; install this alongside it when you do:
+#   pip install -r requirements.txt -r requirements-semantic.txt
+numpy>=1.26.0
+faiss-cpu>=1.8.0
+fastembed>=0.3.6

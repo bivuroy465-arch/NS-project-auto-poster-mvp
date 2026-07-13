@@ -1,0 +1,72 @@
+# AI Social Media Auto-Poster configuration
+# User edits this file to choose providers - no code changes needed.
+
+# Text/LLM provider: openai | claude | gemini | groq
+text_provider: claude
+text_model: claude-3-5-sonnet-20241022
+
+# Image providers, tried in order (fallback chain): openai (DALL-E 3) | stability
+# A single string (image_provider: openai) is still supported for compatibility.
+image_providers:
+  - openai
+  - stability
+image_model: dall-e-3
+image_style: anime
+
+# Platforms to publish to: twitter | linkedin | facebook
+# Tip: start with a single platform while testing.
+platforms:
+  - twitter
+
+# Optional: bias topic selection toward these themes (leave empty for free choice)
+topic_themes:
+  - technology
+  - productivity
+  - AI
+
+# Per-platform character limits (used by the content writer)
+limits:
+  twitter: 280
+  linkedin: 3000
+  facebook: 2000
+
+# Reliability
+max_retries: 3
+
+# Content quality gate (AI editor). Set enabled: false to publish raw output.
+quality_gate:
+  enabled: true
+  editor_provider: groq # any registered text provider; groq is fast/cheap
+  editor_model: llama-3.3-70b-versatile
+  max_attempts: 3
+  banned_words: []
+
+# Duplicate guard: how many recent topics to read from Sheets and avoid.
+# Also used as the sliding-window size of the semantic dedup index below.
+recent_topics_window: 30
+
+# Semantic duplicate guard (embeddings-based; catches paraphrases the
+# lexical guard above misses, e.g. "The rise of edge AI" vs. "Why AI is
+# moving to the edge"). Runs on a shared background event loop alongside
+# the self-learning feedback loop below. See src/semantic_dedup.py.
+semantic_dedup:
+  enabled: true
+  similarity_threshold: 0.86
+  max_attempts: 2 # topic-regeneration attempts if flagged as a semantic duplicate
+  api_fallback: true # allow falling back to OpenAI embeddings if the local model fails
+
+# Self-learning feedback loop: tracks engagement on published posts and
+# feeds the best/worst performing recent examples back into future prompts
+# (see src/feedback_loop.py). Engagement collection currently uses a mock
+# client (no real platform analytics API is wired up yet). Durable storage
+# uses the same Google Sheets credentials as above when configured;
+# otherwise it falls back to in-memory state that does not survive restarts.
+feedback_loop:
+  poll_interval_seconds: 300
+  max_snapshots_per_post: 5
+  history_window: 200
+  exemplars_per_label: 2
+
+# When true, generate content but DO NOT publish (safe for first test).
+# Can also be enabled by setting CI/CD variable DRY_RUN=true
+dry_run: false
