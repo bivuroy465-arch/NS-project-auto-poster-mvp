@@ -1,0 +1,88 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+
+  "version": 2,
+  "name": "ns-project-auto-poster",
+
+  "builds": [
+    {
+      "src": "api/gateway/enqueue.py",
+      "use": "@vercel/python",
+      "config": {
+        "maxLambdaSize": "50mb",
+        "runtime": "python3.12"
+      }
+    },
+    {
+      "src": "api/gateway/status.py",
+      "use": "@vercel/python",
+      "config": {
+        "maxLambdaSize": "50mb",
+        "runtime": "python3.12"
+      }
+    }
+  ],
+
+  "routes": [
+    {
+      "src": "/api/gateway/enqueue",
+      "dest": "api/gateway/enqueue.py",
+      "methods": ["POST"],
+      "headers": {
+        "Access-Control-Allow-Origin": "${{ env.CORS_ALLOWED_ORIGIN || '*' }}",
+        "X-Content-Type-Options": "nosniff",
+        "X-Frame-Options": "DENY",
+        "Referrer-Policy": "strict-origin-when-cross-origin",
+        "Permissions-Policy": "geolocation=()"
+      }
+    },
+    {
+      "src": "/api/gateway/status/([a-f0-9]{16})",
+      "dest": "api/gateway/status.py",
+      "methods": ["GET"],
+      "headers": {
+        "X-Content-Type-Options": "nosniff"
+      }
+    },
+    {
+      "src": "/api/gateway/(.*)",
+      "status": 404,
+      "headers": {
+        "Content-Type": "application/json"
+      }
+    }
+  ],
+
+  "headers": [
+    {
+      "source": "/api/(.*)",
+      "headers": [
+        {
+          "key": "Strict-Transport-Security",
+          "value": "max-age=63072000; includeSubDomains; preload"
+        },
+        {
+          "key": "Cache-Control",
+          "value": "no-store, no-cache, must-revalidate"
+        }
+      ]
+    }
+  ],
+
+  "functions": {
+    "api/gateway/enqueue.py": {
+      "memory": 256,
+      "maxDuration": 10
+    },
+    "api/gateway/status.py": {
+      "memory": 128,
+      "maxDuration": 5
+    }
+  },
+
+  "env": {
+    "GATEWAY_JWT_ISSUER": "autoposter"
+  },
+
+  "regions": ["iad1"]
+}
