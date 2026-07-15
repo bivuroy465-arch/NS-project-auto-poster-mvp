@@ -1,0 +1,216 @@
+# =============================================================================
+# docker-compose.yml — NS-Project Auto-Poster Local E2E Simulation
+#
+# Brings up a production-parity local cluster:
+#
+#   postgres   — Credential Enclave backing store (Postgres 15, persisted volume)
+#   redis      — Event Broker (Redis 7, AOF enabled for durability)
+#   gateway    — Edge Gateway via Uvicorn (FastAPI, port 8000)
+#   worker     — Processing Fleet via our Dockerfile (consumes stream)
+#
+# Quick start:
+#   docker compose up --build
+#
+# See LOCAL_E2E_TESTING.md for the full test lifecycle walkthrough.
+# =============================================================================
+
+name: autoposter
+
+# ---------------------------------------------------------------------------
+# Networks
+# ---------------------------------------------------------------------------
+networks:
+  internal:
+    # All four services share this private network.
+    # Only the gateway port (8000) is exposed to the host.
+    driver: bridge
+
+# ---------------------------------------------------------------------------
+# Volumes
+# ---------------------------------------------------------------------------
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+
+# ---------------------------------------------------------------------------
+# Services
+# ---------------------------------------------------------------------------
+services:
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # 1. POSTGRES — Credential Enclave backing store
+  # ──────────────────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    networks:
+      - internal
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_DB: autoposter
+      POSTGRES_USER: autoposter
+      # Dummy password — local simulation only.
+      # In production, use a strong secret managed by your secrets provider.
+      POSTGRES_PASSWORD: localdev_pg_password
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U autoposter -d autoposter"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    # Expose on the host for local psql access during debugging.
+    ports:
+      - "5432:5432"
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # 2. REDIS — Event Broker (AOF persistence enabled)
+  # ──────────────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    networks:
+      - internal
+    volumes:
+      - redis_data:/data
+    # appendonly yes   — all writes are flushed to the AOF log; survives restarts.
+    # appendfsync everysec — flush interval; balances durability vs. throughput.
+    command: >
+      redis-server
+        --appendonly yes
+        --appendfsync everysec
+        --loglevel notice
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+    ports:
+      - "6379:6379"
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # 3. GATEWAY — Edge Gateway (Vercel serverless simulation via Uvicorn)
+  #
+  # Runs src/gateway/api.py as a long-lived ASGI process instead of the
+  # serverless runtime. Behaviour is identical; only the process model differs.
+  # ──────────────────────────────────────────────────────────────────────────
+  gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: final
+    image: autoposter/gateway:local
+    restart: unless-stopped
+    networks:
+      - internal
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    # Override the fleet entrypoint to run Uvicorn (gateway mode).
+    entrypoint: ["python", "-m", "uvicorn", "src.gateway.api:app",
+                 "--host", "0.0.0.0", "--port", "8000",
+                 "--log-level", "info", "--no-access-log"]
+    environment:
+      # ---- Credential Enclave ------------------------------------------------
+      # 32-byte base64url-encoded master key.  Generated with:
+      #   python -c "import os,base64; print(base64.urlsafe_b64encode(os.urandom(32)).decode())"
+      # This is a DUMMY value safe for local simulation only.
+      ENCLAVE_MASTER_KEY: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+
+      # ---- Redis (local container) -------------------------------------------
+      # The gateway.py GatewayConfig reads UPSTASH_REDIS_REST_URL; we point it
+      # at the local Redis container using the standard redis:// scheme.
+      UPSTASH_REDIS_REST_URL: "redis://redis:6379"
+      # REST token is not used in local mode (no Upstash TLS proxy).
+      # GatewayConfig will fall back to this empty value gracefully.
+      UPSTASH_REDIS_REST_TOKEN: "local"
+
+      # ---- Database ----------------------------------------------------------
+      DATABASE_URL: "postgresql://autoposter:localdev_pg_password@postgres:5432/autoposter"
+
+      # ---- Gateway JWT -------------------------------------------------------
+      # Generate a real secret for production:
+      #   python -c "import secrets; print(secrets.token_hex(32))"
+      GATEWAY_JWT_SECRET: "local_dev_jwt_secret_do_not_use_in_production_00000000000000"
+      GATEWAY_JWT_ISSUER: "autoposter"
+
+      # ---- Observability (console output in local mode) ----------------------
+      OTEL_SERVICE_NAME: "autoposter-gateway"
+      # Omit OTEL_EXPORTER_OTLP_ENDPOINT to use the Console exporter locally.
+
+      # ---- Pipeline behaviour ------------------------------------------------
+      # Set DRY_RUN=true so the worker generates content but does NOT post to
+      # any social platform.  Remove or set to false for a live test.
+      DRY_RUN: "true"
+      LOG_LEVEL: "INFO"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/v1/health')\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # 4. WORKER — Processing Fleet (our Dockerfile, runs docker-entrypoint.sh)
+  #
+  # Waits for both Redis and Postgres to be healthy, runs migrations via the
+  # entrypoint, then starts the stream consumer loop.
+  # ──────────────────────────────────────────────────────────────────────────
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: final
+    image: autoposter/worker:local
+    restart: unless-stopped
+    networks:
+      - internal
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    environment:
+      # ---- Credential Enclave (same master key as gateway) -------------------
+      ENCLAVE_MASTER_KEY: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+
+      # ---- Redis (local container) -------------------------------------------
+      UPSTASH_REDIS_REST_URL: "redis://redis:6379"
+      UPSTASH_REDIS_REST_TOKEN: "local"
+
+      # ---- Database ----------------------------------------------------------
+      DATABASE_URL: "postgresql://autoposter:localdev_pg_password@postgres:5432/autoposter"
+
+      # ---- Gateway JWT (worker uses it to authenticate to itself in tests) ---
+      GATEWAY_JWT_SECRET: "local_dev_jwt_secret_do_not_use_in_production_00000000000000"
+      GATEWAY_JWT_ISSUER: "autoposter"
+
+      # ---- Observability -----------------------------------------------------
+      OTEL_SERVICE_NAME: "autoposter-worker"
+
+      # ---- Pipeline ----------------------------------------------------------
+      DRY_RUN: "true"
+      LOG_LEVEL: "INFO"
+
+      # ---- API provider keys (dummy — pipeline runs in dry-run mode) ---------
+      # Replace with real keys or use ENCRYPTED_* vars + the enclave provisioner
+      # (scripts/provision_enclave.py) for a live test.
+      OPENAI_API_KEY: "sk-dummy-local-dev"
+      ANTHROPIC_API_KEY: "sk-ant-dummy-local-dev"
+      TWITTER_API_KEY: "dummy"
+      TWITTER_API_SECRET: "dummy"
+      TWITTER_ACCESS_TOKEN: "dummy"
+      TWITTER_ACCESS_SECRET: "dummy"
+      LINKEDIN_ACCESS_TOKEN: "dummy"
+      LINKEDIN_AUTHOR_URN: "urn:li:person:dummy"
+      FACEBOOK_PAGE_ID: "dummy"
+      FACEBOOK_PAGE_ACCESS_TOKEN: "dummy"
+    # The entrypoint from the Dockerfile handles: env guard → migrations → exec fleet.
+    # No override needed here — the default ENTRYPOINT in the Dockerfile is correct.
