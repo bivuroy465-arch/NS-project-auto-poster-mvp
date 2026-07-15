@@ -32,8 +32,18 @@ from .topic_generator import generate_topic
 log = get_logger("main")
 
 
-def run() -> int:
-    cfg = load_config()
+def run(cfg: dict | None = None) -> int:
+    """Run the full pipeline.
+
+    Parameters
+    ----------
+    cfg : optional pre-built configuration dict. When None (CLI / cron mode),
+          the config is loaded from config.yaml + env. The Processing Fleet
+          passes a config with per-job overrides (platforms, dry_run, extra)
+          already applied — see src/fleet/worker.py::_execute_pipeline.
+    """
+    if cfg is None:
+        cfg = load_config()
     dry_run = bool(cfg.get("dry_run"))
     if dry_run:
         log.warning("DRY RUN enabled - content will be generated but NOT published.")

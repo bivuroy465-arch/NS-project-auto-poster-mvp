@@ -7,6 +7,7 @@ Public API
 See enclave.py for full documentation.
 """
 
+from .crypto import DecryptionError, SealedBlob, SecretBuffer, seal, unseal, zero_buffer
 from .enclave import (
     AuthenticationError,
     CredentialStore,
@@ -14,11 +15,21 @@ from .enclave import (
     LifecycleManager,
     encrypt_credential,
 )
+from .storage import CredentialMissingError, CredentialRepository, StorageUnavailableError
 
 __all__ = [
     "AuthenticationError",
+    "CredentialMissingError",
+    "CredentialRepository",
     "CredentialStore",
+    "DecryptionError",
     "EncryptedCredential",
     "LifecycleManager",
+    "SealedBlob",
+    "SecretBuffer",
+    "StorageUnavailableError",
     "encrypt_credential",
+    "seal",
+    "unseal",
+    "zero_buffer",
 ]

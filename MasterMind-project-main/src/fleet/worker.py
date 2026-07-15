@@ -291,9 +291,24 @@ class Worker:
         # Import here (not at module level) to keep worker startup fast and
         # avoid importing the entire pipeline before a job is actually claimed.
         from .. import main as pipeline_main
-        exit_code = pipeline_main.run()
-        if exit_code != 0:
-            raise RuntimeError(f"Pipeline exited with code {exit_code}")
+        from ..observability import record_exception, tracer
+
+        with tracer("fleet").start_as_current_span("pipeline.execute") as span:
+            # Only non-sensitive attributes — the RedactingSpanProcessor is a
+            # second line of defence, not the first.
+            span.set_attribute("gateway.job_id", msg.job_id)
+            span.set_attribute("fleet.worker_id", self._cfg.worker_id)
+            span.set_attribute("pipeline.dry_run", bool(base_cfg.get("dry_run")))
+            span.set_attribute("pipeline.platforms", ",".join(base_cfg.get("platforms", [])))
+            try:
+                exit_code = pipeline_main.run(base_cfg)
+            except Exception as exc:
+                record_exception(span, exc)
+                raise
+            if exit_code != 0:
+                err = RuntimeError(f"Pipeline exited with code {exit_code}")
+                record_exception(span, err)
+                raise err
 
     # -- Failure handling ----------------------------------------------------
 
