@@ -1,0 +1,51 @@
+# Version control
+.git
+.gitignore
+.github
+
+# Python artefacts
+__pycache__
+*.py[cod]
+*.pyo
+.mypy_cache
+.ruff_cache
+.pytest_cache
+.coverage
+coverage.xml
+htmlcov/
+dist/
+build/
+*.egg-info/
+
+# Virtual environments
+.venv
+venv
+env
+
+# Development / CI artefacts
+bandit-report.json
+*.log
+
+# Tests (not needed at runtime)
+tests/
+
+# Documentation
+docs/
+*.md
+CHANGELOG
+LICENSE
+
+# Local config overrides and secrets
+.env
+.env.*
+!.env.example
+
+# IDE / OS
+.DS_Store
+.idea
+.vscode
+*.swp
+Thumbs.db
+
+# Frontend / JS (not applicable, kept for future-proofing)
+node_modules/

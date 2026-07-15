@@ -9,16 +9,16 @@
       "src": "api/gateway/enqueue.py",
       "use": "@vercel/python",
       "config": {
-        "maxLambdaSize": "50mb",
-        "runtime": "python3.12"
+        "maxLambdaSize": "30mb",
+        "runtime": "python3.11"
       }
     },
     {
       "src": "api/gateway/status.py",
       "use": "@vercel/python",
       "config": {
-        "maxLambdaSize": "50mb",
-        "runtime": "python3.12"
+        "maxLambdaSize": "30mb",
+        "runtime": "python3.11"
       }
     }
   ],
@@ -29,7 +29,9 @@
       "dest": "api/gateway/enqueue.py",
       "methods": ["POST"],
       "headers": {
-        "Access-Control-Allow-Origin": "${{ env.CORS_ALLOWED_ORIGIN || '*' }}",
+        "Access-Control-Allow-Origin": "${{ env.CORS_ALLOWED_ORIGIN }}",
+        "Access-Control-Allow-Methods": "POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Authorization, Content-Type",
         "X-Content-Type-Options": "nosniff",
         "X-Frame-Options": "DENY",
         "Referrer-Policy": "strict-origin-when-cross-origin",
@@ -72,7 +74,7 @@
   "functions": {
     "api/gateway/enqueue.py": {
       "memory": 256,
-      "maxDuration": 10
+      "maxDuration": 8
     },
     "api/gateway/status.py": {
       "memory": 128,
